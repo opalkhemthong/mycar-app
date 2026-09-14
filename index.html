@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyCar — parking log</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9A%97%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F2EFE8; --cream:#FFFDF8; --ink:#14142B;
+  --indigo:#5B5BFF; --indigo-light:#EFEDFF;
+  --yellow:#FFC531; --coral:#FF6B4A; --coral-bg:#FFE9E3;
+  --green-bg:#E6FBF3; --green:#1FAE85; --green-dark:#137A5C;
+  --orange:#E0502A; --line:#06C755;
+  --amber-bg:#FFF1DC; --amber-text:#8A5D12; --amber-icon:#C98A16;
+  --muted:rgba(20,20,43,.45); --muted2:rgba(20,20,43,.6); --hair:rgba(20,20,43,.07);
+  --gred:#EA4335; --gblue:#1A73E8;
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg)}
+body{margin:0;padding:0 16px;font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+.shell{max-width:430px;margin:0 auto;min-height:100vh;background:var(--cream);position:relative;box-shadow:0 0 0 1px rgba(20,20,43,.04)}
+button{font-family:inherit;border:none;background:none;cursor:pointer;color:inherit;-webkit-tap-highlight-color:transparent}
+input,textarea{font-family:inherit}
+a{color:inherit;text-decoration:none}
+img{max-width:100%}
+code{background:#F3F2F7;border-radius:4px;padding:1px 5px;font-size:.92em}
+.disp{font-family:'Bricolage Grotesque',sans-serif;letter-spacing:-.02em}
+.mono-num{font-variant-numeric:tabular-nums}
+::placeholder{color:rgba(20,20,43,.35)}
+:focus-visible{outline:2.5px solid var(--indigo);outline-offset:2px;border-radius:4px}
+input:focus-visible,textarea:focus-visible{outline-offset:0;border-radius:8px}
+@keyframes sheet-up{from{transform:translateY(100%)}to{transform:translateY(0)}}
+@keyframes fade-in{from{opacity:0}to{opacity:1}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){
+  .overlay-scrim,.sheet,.toast{animation:none}
+  .spinner{animation-duration:1.6s}
+}
+.overlay-scrim{position:fixed;inset:0;background:rgba(20,20,43,.42);z-index:40;animation:fade-in .15s ease}
+.sheet{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:430px;background:var(--cream);border-radius:26px 26px 0 0;padding:18px 20px 30px;box-sizing:border-box;z-index:41;animation:sheet-up .25s ease;box-shadow:0 -10px 40px rgba(20,20,43,.15)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:118px;width:calc(100% - 32px);max-width:398px;background:var(--ink);color:#fff;border-radius:16px;padding:14px 16px;font-size:14px;font-weight:600;box-shadow:0 12px 30px rgba(20,20,43,.35);z-index:50;animation:fade-in .18s ease}
+.spinner{width:26px;height:26px;border-radius:999px;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;animation:spin .8s linear infinite}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none">
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* ═══════════════════════════════════════════════════════════════
+   CONFIG — fill these in from your Supabase project
+   (Project Settings → API → Project URL / anon public key),
+   then reload the page. See SUPABASE_SETUP.md in this repo.
+   ═══════════════════════════════════════════════════════════════ */
+var SUPABASE_URL = 'https://nptvdeegjeantmeiampp.supabase.co';
+var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wdHZkZWVnamVhbnRtZWlhbXBwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNDk1OTIsImV4cCI6MjEwNDkyNTU5Mn0.leSjkoIw5EELUUmFRlodyDSPutOcNGjVVMjTjqg3aJw';
+var POLL_MS = 8000; // how often every open tab re-checks for other drivers' changes
+
+/* ───────────────────────── constants ───────────────────────── */
+var DOW = ['S','M','T','W','T','F','S'];
+var MON = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+var MONL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+var DAYL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+var MEMBER_COLORS = ['#5B5BFF','#FF6B4A','#1FAE85','#C98A16','#1A73E8','#E0502A'];
+var RETAIN_DAYS = 366;
+
+/* ───────────────────────── date helpers ───────────────────────── */
+function pad2(n){ return String(n).padStart(2,'0'); }
+function dkey(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+function parseKey(k){ var p = k.split('-').map(Number); return new Date(p[0], p[1]-1, p[2]); }
+function todayKey(){ return dkey(new Date()); }
+
+/* ───────────────────────── tiny utils ───────────────────────── */
+function esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+  });
+}
+function ensureDriverId(){
+  var id = localStorage.getItem('mycar_driver_id');
+  if(!id){
+    id = 'd' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+    localStorage.setItem('mycar_driver_id', id);
+  }
+  return id;
+}
+function genCarCode(){
+  var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to avoid mixups
+  var s = '';
+  for(var i=0;i<5;i++) s += chars[Math.floor(Math.random()*chars.length)];
+  return 'MYCAR-' + s;
+}
+function normalizeCode(raw){
+  var c = String(raw||'').toUpperCase().replace(/\s+/g,'');
+  c = c.replace(/^MYCAR-?/,'');
+  c = c.replace(/[^A-Z0-9]/g,'');
+  return c ? 'MYCAR-' + c : '';
+}
+function isUniqueViolation(err){
+  return !!(err && (err.code === '23505' || /duplicate key|already exists/i.test(err.message || '')));
+}
+
+/* ───────────────────────── image compression ───────────────────────── */
+function compressImage(file){
+  return new Promise(function(resolve, reject){
+    var img = new Image();
+    var url = URL.createObjectURL(file);
+    img.onload = function(){
+      URL.revokeObjectURL(url);
+      var dims = [900, 700, 520, 380];
+      var best = null;
+      for(var di=0; di<dims.length; di++){
+        var maxDim = dims[di];
+        var w = img.width, h = img.height;
+        if(w >= h){ if(w > maxDim){ h = Math.round(h*maxDim/w); w = maxDim; } }
+        else { if(h > maxDim){ w = Math.round(w*maxDim/h); h = maxDim; } }
+        var canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        var qualities = [0.75, 0.6, 0.45, 0.3];
+        for(var qi=0; qi<qualities.length; qi++){
+          var durl = canvas.toDataURL('image/jpeg', qualities[qi]);
+          if(durl.length < 350000){ resolve(durl); return; }
+          best = durl;
+        }
+      }
+      resolve(best);
+    };
+    img.onerror = function(){ reject(new Error('image load failed')); };
+    img.src = url;
+  });
+}
+
+/* ───────────────────────── store: Supabase (Postgres via RPC) ─────────────────────────
+   Every call goes through a SECURITY DEFINER Postgres function (see
+   supabase_schema.sql) instead of touching tables directly — the anon key
+   embedded in this public page can only read/write a car whose exact code
+   it already has; it can never list or guess other people's cars. */
+var store = { mode: 'unconfigured', sb: null };
+
+function mapEntryRow(r){
+  return {
+    date: r.date, building: r.building, floor: r.floor || '', note: r.note || '',
+    photo: r.photo || null,
+    lat: (r.lat === null || r.lat === undefined) ? null : Number(r.lat),
+    lng: (r.lng === null || r.lng === undefined) ? null : Number(r.lng),
+    savedAt: r.saved_at ? new Date(r.saved_at).getTime() : null,
+    savedTime: r.saved_time || '', savedBy: r.saved_by || '', savedById: r.saved_by_id || ''
+  };
+}
+function mapMemberRow(r){
+  return { id: r.id, name: r.name, role: r.role || 'Driver', lastActive: r.last_active ? new Date(r.last_active).getTime() : 0 };
+}
+function pollingSubscription(rpcName, code, mapRow, cb){
+  var stopped = false;
+  var poll = async function(){
+    if(stopped) return;
+    try{
+      var res = await store.sb.rpc(rpcName, { p_code: code });
+      if(stopped) return;
+      if(res.error){ console.error(rpcName + ' failed', res.error); return; }
+      cb((res.data || []).map(mapRow));
+    }catch(e){ console.error(rpcName + ' failed', e); }
+  };
+  poll();
+  var timer = setInterval(poll, POLL_MS);
+  var unsub = function(){ stopped = true; clearInterval(timer); };
+  unsub.refresh = poll; // called right after our own writes for a snappier feel than waiting for the next tick
+  return unsub;
+}
+
+Object.assign(store, {
+  async init(){
+    var configured = SUPABASE_URL && SUPABASE_ANON_KEY &&
+      SUPABASE_URL.indexOf('YOUR_') !== 0 && SUPABASE_ANON_KEY.indexOf('YOUR_') !== 0 &&
+      window.supabase && typeof window.supabase.createClient === 'function';
+    if(!configured){ store.mode = 'unconfigured'; return; }
+    store.sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    store.mode = 'supabase';
+  },
+  async getCar(code){
+    var res = await store.sb.rpc('mycar_get_car', { p_code: code });
+    if(res.error) throw res.error;
+    var row = res.data && res.data[0];
+    return row ? { ownerId: row.owner_id, createdAt: row.created_at } : null;
+  },
+  async createCar(code, ownerId){
+    var res = await store.sb.rpc('mycar_create_car', { p_code: code, p_owner_id: ownerId });
+    if(res.error) throw res.error;
+  },
+  async upsertMember(code, id, patch){
+    var res = await store.sb.rpc('mycar_upsert_member', { p_code: code, p_id: id, p_name: patch.name, p_role: patch.role || 'Driver' });
+    if(res.error) throw res.error;
+  },
+  subscribeEntries(code, cb){ return pollingSubscription('mycar_list_entries', code, mapEntryRow, cb); },
+  subscribeMembers(code, cb){ return pollingSubscription('mycar_list_members', code, mapMemberRow, cb); },
+  async saveEntry(code, date, data){
+    var res = await store.sb.rpc('mycar_save_entry', {
+      p_code: code, p_date: date, p_building: data.building, p_floor: data.floor || '',
+      p_note: data.note || '', p_photo: data.photo || null,
+      p_lat: (data.lat == null ? null : data.lat), p_lng: (data.lng == null ? null : data.lng),
+      p_saved_time: data.savedTime, p_saved_by: data.savedBy, p_saved_by_id: data.savedById
+    });
+    if(res.error) throw res.error;
+  },
+  async deleteEntry(code, date){
+    var res = await store.sb.rpc('mycar_delete_entry', { p_code: code, p_date: date });
+    if(res.error) throw res.error;
+  }
+});
+
+/* ───────────────────────── app state ───────────────────────── */
+var state = {
+  booting: true,
+  screen: 'welcome',
+  carCode: null, driverId: null, driverName: '',
+  date: todayKey(),
+  draft: null, extraFloors: [],
+  entries: [], members: [],
+  showCal: false, calYear: 0, calMonth: 0,
+  filter: 'All', selectedDate: null, confirming: false,
+  toast: '', welcome: { name: '', code: '', showJoin: false },
+  busy: false, showCodeSheet: false
+};
+var unsubEntries = null, unsubMembers = null, toastTimer = null;
+
+function getEntry(date){ return state.entries.find(function(e){ return e.date === date; }); }
+function getDraft(){
+  if(state.draft) return state.draft;
+  var e = getEntry(state.date);
+  return e
+    ? { building: e.building, floor: e.floor, note: e.note, photo: e.photo || null, lat: e.lat, lng: e.lng }
+    : { building: '', floor: '', note: '', photo: null, lat: null, lng: null };
+}
+function setDraft(patch){ state.draft = Object.assign({}, getDraft(), patch); }
+
+function flash(msg){
+  state.toast = msg;
+  render();
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ state.toast = ''; render(); }, 2200);
+}
+function refreshNow(){
+  if(unsubEntries && unsubEntries.refresh) unsubEntries.refresh();
+  if(unsubMembers && unsubMembers.refresh) unsubMembers.refresh();
+}
+
+/* ───────────────────────── car session ───────────────────────── */
+function persistSession(code, name){
+  localStorage.setItem('mycar_car_code', code);
+  localStorage.setItem('mycar_driver_name', name);
+  state.carCode = code;
+  state.driverName = name;
+}
+function enterCar(code){
+  state.carCode = code;
+  state.screen = 'record';
+  state.date = todayKey();
+  state.draft = null;
+  state.entries = []; state.members = [];
+  if(unsubEntries) unsubEntries();
+  if(unsubMembers) unsubMembers();
+  unsubEntries = store.subscribeEntries(code, function(entries){ state.entries = entries; render(); });
+  unsubMembers = store.subscribeMembers(code, function(members){ state.members = members; render(); });
+  render();
+}
+function signOut(){
+  localStorage.removeItem('mycar_car_code');
+  localStorage.removeItem('mycar_driver_name');
+  if(unsubEntries) unsubEntries();
+  if(unsubMembers) unsubMembers();
+  unsubEntries = unsubMembers = null;
+  state.carCode = null; state.driverName = ''; state.entries = []; state.members = [];
+  state.screen = 'welcome'; state.date = todayKey(); state.draft = null;
+  render();
+}
+
+async function onStartCar(){
+  var name = (state.welcome.name || '').trim();
+  if(!name){ flash('Enter your name first'); return; }
+  flash('Setting up your car…');
+  try{
+    var code, created = false, attempts = 0;
+    while(!created && attempts < 5){
+      code = genCarCode();
+      try{ await store.createCar(code, state.driverId); created = true; }
+      catch(err){ attempts++; if(!isUniqueViolation(err)) throw err; }
+    }
+    if(!created){ flash('Could not create a car — try again'); return; }
+    await store.upsertMember(code, state.driverId, { name: name, role: 'Owner' });
+    persistSession(code, name);
+    enterCar(code);
+    state.showCodeSheet = true;
+    render();
+  }catch(err){ console.error(err); flash('Could not create a car — try again'); }
+}
+async function onJoinCar(){
+  var name = (state.welcome.name || '').trim();
+  var raw = (state.welcome.code || '').trim();
+  if(!name){ flash('Enter your name first'); return; }
+  if(!raw){ flash('Enter the car code'); return; }
+  var code = normalizeCode(raw);
+  if(!code){ flash('That code doesn’t look right'); return; }
+  flash('Joining…');
+  try{
+    var car = await store.getCar(code);
+    if(!car){ flash('Car code not found'); return; }
+    var role = car.ownerId === state.driverId ? 'Owner' : 'Driver';
+    await store.upsertMember(code, state.driverId, { name: name, role: role });
+    persistSession(code, name);
+    enterCar(code);
+  }catch(err){ console.error(err); flash('Could not join — check the code and try again'); }
+}
+
+/* ───────────────────────── record actions ───────────────────────── */
+function floorOptions(){
+  var used = {};
+  for(var i=1;i<=10;i++) used[String(i)] = true;
+  state.entries.forEach(function(e){ if(e.floor) used[String(e.floor)] = true; });
+  state.extraFloors.forEach(function(f){ used[f] = true; });
+  var dr = getDraft();
+  if(dr.floor) used[String(dr.floor)] = true;
+  return Object.keys(used).sort(function(a,b){ return (parseInt(a,10)||0) - (parseInt(b,10)||0); });
+}
+function onAddFloor(){
+  var nums = floorOptions().map(function(f){ return parseInt(f,10) || 0; });
+  var next = String(Math.max.apply(null, nums.concat([0])) + 1);
+  state.extraFloors.push(next);
+  setDraft({ floor: next });
+  render();
+}
+function geoErrorMessage(err){
+  // err.code: 1 = PERMISSION_DENIED, 2 = POSITION_UNAVAILABLE, 3 = TIMEOUT
+  if(err && err.code === 1){
+    return 'Location blocked for this page — if you opened MyCar inside another app’s preview pane, open the link directly in Safari/Chrome instead and allow location there';
+  }
+  if(err && err.code === 2){
+    return 'Your device couldn’t get a fix — try again outdoors or with Wi‑Fi/GPS turned on';
+  }
+  if(err && err.code === 3){
+    return 'Location took too long to respond — try again';
+  }
+  return 'Couldn’t get your location — check permissions';
+}
+function requestLocation(){
+  if(!navigator.geolocation){ flash('Location isn’t available on this device'); return; }
+  flash('Getting your location…');
+  navigator.geolocation.getCurrentPosition(
+    function(pos){ setDraft({ lat: pos.coords.latitude, lng: pos.coords.longitude }); flash('Location saved'); },
+    function(err){ console.error('geolocation error', err && err.code, err && err.message); flash(geoErrorMessage(err)); },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+  );
+}
+function handlePhotoFile(file){
+  if(!file) return;
+  flash('Adding photo…');
+  compressImage(file).then(function(dataUrl){
+    setDraft({ photo: dataUrl });
+    flash('Photo added');
+  }).catch(function(){ flash('Could not read that photo'); });
+}
+async function doSave(){
+  var dr = getDraft();
+  if(!dr.building || !dr.building.trim()){ flash('Add a building first'); return; }
+  var date = state.date;
+  var wasExisting = !!getEntry(date);
+  var now = new Date();
+  var timeStr = pad2(now.getHours()) + ':' + pad2(now.getMinutes());
+  var mine = state.members.find(function(m){ return m.id === state.driverId; });
+  var payload = {
+    building: dr.building.trim(), floor: dr.floor || '', note: (dr.note||'').trim(),
+    photo: dr.photo || null, lat: (dr.lat == null ? null : dr.lat), lng: (dr.lng == null ? null : dr.lng),
+    savedTime: timeStr, savedBy: state.driverName, savedById: state.driverId
+  };
+  state.busy = true;
+  try{
+    await store.saveEntry(state.carCode, date, payload);
+    await store.upsertMember(state.carCode, state.driverId, {
+      name: state.driverName, role: mine ? mine.role : 'Driver'
+    });
+  }catch(err){
+    console.error(err);
+    state.busy = false;
+    flash('Could not save — try again');
+    return;
+  }
+  state.busy = false;
+  state.draft = null;
+  refreshNow();
+  flash(wasExisting ? 'Updated · ' + timeStr : 'Saved · ' + timeStr);
+}
+async function onDeleteCurrent(){
+  var date = state.date;
+  try{ await store.deleteEntry(state.carCode, date); state.draft = null; refreshNow(); flash('Record deleted'); }
+  catch(err){ console.error(err); flash('Could not delete — try again'); }
+}
+async function onConfirmDelete(){
+  var date = state.selectedDate;
+  state.confirming = false;
+  try{
+    await store.deleteEntry(state.carCode, date);
+    state.screen = 'history'; state.selectedDate = null;
+    refreshNow();
+    flash('Record deleted');
+  }catch(err){ console.error(err); render(); flash('Could not delete — try again'); }
+}
+
+/* ───────────────────────── sharing ───────────────────────── */
+function lineShareUrl(text){ return 'https://line.me/R/msg/text/?' + encodeURIComponent(text); }
+function shareCarInvite(){
+  var text = 'Join our MyCar parking log — use car code ' + state.carCode + ' to see the same spot I do. ' + location.href;
+  window.open(lineShareUrl(text), '_blank');
+}
+function shareSpot(entry){
+  var text = 'Parked at ' + entry.building + (entry.floor ? ' · Floor ' + entry.floor : '') + ' on ' + entry.date + '.';
+  if(entry.lat != null){ text += ' Location: https://www.google.com/maps?q=' + entry.lat + ',' + entry.lng; }
+  window.open(lineShareUrl(text), '_blank');
+}
+function onShareLine(){
+  var date = state.screen === 'detail' ? state.selectedDate : state.date;
+  var e = getEntry(date);
+  if(e) shareSpot(e); else flash('Save a spot first to share it');
+}
+function openInMaps(lat, lng){ window.open('https://www.google.com/maps?q=' + lat + ',' + lng, '_blank'); }
+async function copyCode(){
+  try{ await navigator.clipboard.writeText(state.carCode); flash('Code copied'); }
+  catch(e){ flash('Your code is ' + state.carCode); }
+}
+
+/* ───────────────────────── view helpers ───────────────────────── */
+function elapsedStr(entry){
+  if(!entry || !entry.savedAt) return '';
+  var m = Math.max(0, Math.floor((Date.now() - entry.savedAt) / 60000));
+  return Math.floor(m/60) + 'h ' + pad2(m % 60) + 'm';
+}
+function relativeDay(ts){
+  if(!ts) return '';
+  if(dkey(new Date(ts)) === todayKey()) return 'today';
+  var d = new Date(ts);
+  return d.getDate() + ' ' + MON[d.getMonth()];
+}
+function calendarCells(calYear, calMonth, selectedDateKey){
+  var first = new Date(calYear, calMonth, 1).getDay();
+  var days = new Date(calYear, calMonth+1, 0).getDate();
+  var todayK = todayKey();
+  var cells = [];
+  for(var i=0;i<first;i++) cells.push(null);
+  for(var i=1;i<=days;i++){
+    var k = calYear + '-' + pad2(calMonth+1) + '-' + pad2(i);
+    cells.push({ day: i, key: k, has: !!getEntry(k), sel: k === selectedDateKey, future: k > todayK });
+  }
+  return cells;
+}
+function membersVm(){
+  return state.members.slice()
+    .sort(function(a,b){ return (b.lastActive||0) - (a.lastActive||0); })
+    .map(function(m, i){
+      var nm = (m.name || 'Driver').trim();
+      return {
+        initial: (nm.charAt(0) || '?').toUpperCase(),
+        name: nm, role: m.role === 'Owner' ? 'Owner' : 'Driver',
+        last: relativeDay(m.lastActive), color: MEMBER_COLORS[i % MEMBER_COLORS.length],
+        isYou: m.id === state.driverId
+      };
+    });
+}
+
+/* ───────────────────────── icons (inline, no deps) ───────────────────────── */
+function cameraIcon(){
+  return '<div style="position:relative;width:34px;height:25px;border-radius:8px;background:#C98A16;display:flex;align-items:center;justify-content:center">' +
+    '<div style="position:absolute;top:-5px;left:7px;width:11px;height:6px;border-radius:3px 3px 0 0;background:#C98A16"></div>' +
+    '<div style="position:absolute;top:4px;right:5px;width:4px;height:4px;border-radius:999px;background:#FFE3B5"></div>' +
+    '<div style="width:13px;height:13px;border-radius:999px;border:2.5px solid #FFF1DC"></div></div>';
+}
+function pinTile(has, label){
+  var bg = 'linear-gradient(120deg,#E8F0E2 0%,#F1F3E9 45%,#DCE7EE 100%)';
+  return '<button type="button" data-act="addPin" style="all:unset;flex:1;height:88px;border-radius:18px;overflow:hidden;position:relative;border:1px solid var(--hair);cursor:pointer;background:' + bg + '">' +
+    '<div style="position:absolute;left:-10%;top:44%;width:130%;height:7px;background:var(--cream);transform:rotate(-8deg)"></div>' +
+    '<div style="position:absolute;left:30%;top:-20%;width:6px;height:140%;background:var(--cream);transform:rotate(12deg)"></div>' +
+    '<div style="position:absolute;left:50%;top:34%;transform:translateX(-50%) rotate(-45deg);width:18px;height:18px;border-radius:50% 50% 50% 0;background:var(--gred);box-shadow:0 3px 8px rgba(0,0,0,.25)"></div>' +
+    '<div style="position:absolute;left:0;right:0;bottom:0;padding:6px 0;background:rgba(255,253,248,.92);text-align:center;font-size:12px;font-weight:700;color:var(--gblue)">' + esc(label) + '</div>' +
+    (has ? '<span data-act="removePin" style="position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:999px;background:rgba(20,20,43,.55);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center">×</span>' : '') +
+    '</button>';
+}
+
+/* ───────────────────────── screen: splash / setup ───────────────────────── */
+function splashHtml(){
+  return '<div class="shell" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:var(--indigo);color:#fff">' +
+    '<div style="width:64px;height:64px;border-radius:20px;background:var(--yellow);display:flex;align-items:center;justify-content:center">' +
+    '<div style="width:30px;height:18px;border-radius:5px 5px 3px 3px;background:var(--ink)"></div></div>' +
+    '<div class="disp" style="font-size:28px;font-weight:800">MyCar</div>' +
+    '<div class="spinner"></div></div>';
+}
+function setupNeededHtml(){
+  return '<div class="shell" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:32px;box-sizing:border-box;text-align:center">' +
+    '<div style="width:56px;height:56px;border-radius:18px;background:var(--yellow);display:flex;align-items:center;justify-content:center;margin-bottom:4px">' +
+      '<div style="width:26px;height:16px;border-radius:5px 5px 3px 3px;background:var(--ink)"></div></div>' +
+    '<div class="disp" style="font-size:23px;font-weight:800;color:var(--ink)">Almost there</div>' +
+    '<div style="font-size:14px;font-weight:500;color:rgba(20,20,43,.65);line-height:1.6;max-width:320px">This copy of MyCar isn’t connected to a database yet. Open <code>index.html</code>, fill in <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> near the top of the script, then reload. See <code>SUPABASE_SETUP.md</code> for step-by-step instructions.</div>' +
+  '</div>';
+}
+
+/* ───────────────────────── screen: welcome ───────────────────────── */
+function welcomeHtml(){
+  var w = state.welcome;
+  var fieldStyle = "width:100%;box-sizing:border-box;height:52px;border-radius:16px;border:1.5px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);color:#fff;padding:0 16px;font-size:16px;font-weight:600";
+  return '<div class="shell" style="min-height:100vh;background:var(--indigo);display:flex;flex-direction:column;padding:64px 26px 40px;box-sizing:border-box;color:#fff">' +
+    '<div style="width:64px;height:64px;border-radius:20px;background:var(--yellow);display:flex;align-items:center;justify-content:center;margin-bottom:26px">' +
+      '<div style="width:30px;height:18px;border-radius:5px 5px 3px 3px;background:var(--ink)"></div></div>' +
+    '<div class="disp" style="font-size:44px;font-weight:800;line-height:1.05">MyCar</div>' +
+    '<div style="font-size:16px;font-weight:500;opacity:.85;margin-top:10px;line-height:1.5;max-width:300px">Write down where you parked. Everyone who shares the car sees the same note.</div>' +
+    '<div style="margin-top:32px;display:flex;flex-direction:column;gap:11px">' +
+      '<div>' +
+        '<div style="font-size:12px;font-weight:700;letter-spacing:.06em;opacity:.7;margin-bottom:6px">YOUR NAME</div>' +
+        '<input id="welcomeNameInput" data-bind="welcomeName" value="' + esc(w.name) + '" placeholder="e.g. Mild" style="' + fieldStyle + '">' +
+      '</div>' +
+      (w.showJoin ?
+        '<div style="margin-top:2px">' +
+          '<div style="font-size:12px;font-weight:700;letter-spacing:.06em;opacity:.7;margin-bottom:6px">CAR CODE</div>' +
+          '<input id="welcomeCodeInput" data-bind="welcomeCode" value="' + esc(w.code) + '" placeholder="MYCAR-48K" style="' + fieldStyle + ';margin-bottom:11px;text-transform:uppercase">' +
+          '<button type="button" data-act="joinCar" style="width:100%;height:56px;border-radius:999px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16.5px;font-weight:700;cursor:pointer">Join this car</button>' +
+          '<button type="button" data-act="showJoin" style="width:100%;text-align:center;padding:12px 0 0;font-size:13.5px;font-weight:600;opacity:.8;cursor:pointer">Back</button>' +
+        '</div>'
+      :
+        '<button type="button" data-act="startCar" style="height:56px;border-radius:999px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;gap:9px;font-size:16.5px;font-weight:700;cursor:pointer">Start a new car</button>' +
+        '<button type="button" data-act="showJoin" style="height:56px;border-radius:999px;border:1.5px solid rgba(255,255,255,.45);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;cursor:pointer;color:#fff;background:transparent">Join with a car code</button>'
+      ) +
+      '<div style="text-align:center;font-size:12px;font-weight:500;opacity:.65;margin-top:8px;line-height:1.5">One car code, every driver — no separate accounts needed.</div>' +
+    '</div>' +
+  '</div>';
+}
+
+/* ───────────────────────── screen: record ───────────────────────── */
+function recordHtml(){
+  var st = state;
+  var d = parseKey(st.date);
+  var entry = getEntry(st.date);
+  var dr = getDraft();
+  var isToday = st.date === todayKey();
+  var isSaved = !!(entry && entry.savedAt && isToday);
+  var dateTitle = (isToday ? 'Today, ' : '') + DAYL[d.getDay()].slice(0,3) + ' ' + d.getDate() + ' ' + MONL[d.getMonth()].slice(0,3);
+
+  var floorsHtml = floorOptions().map(function(f){
+    var active = dr.floor === f;
+    return '<button type="button" data-act="pickFloor" data-arg="' + esc(f) + '" style="min-width:46px;padding:10px 15px;border-radius:999px;text-align:center;font-size:15px;font-weight:800;cursor:pointer;background:' + (active ? 'var(--coral)' : '#F3F2F7') + ';color:' + (active ? '#fff' : 'rgba(20,20,43,.55)') + '">' + esc(f) + '</button>';
+  }).join('') + '<button type="button" data-act="addFloor" style="padding:10px 14px;border-radius:999px;background:#fff;border:1.5px dashed rgba(20,20,43,.2);font-size:15px;font-weight:700;color:var(--muted);cursor:pointer">＋</button>';
+
+  var photoTile = dr.photo
+    ? '<div style="flex:1;height:88px;border-radius:18px;overflow:hidden;position:relative;border:1px solid var(--hair)">' +
+        '<img src="' + dr.photo + '" style="width:100%;height:100%;object-fit:cover;display:block" alt="Parking spot photo">' +
+        '<button type="button" data-act="addPhoto" style="position:absolute;inset:0;background:transparent"></button>' +
+        '<span data-act="removePhoto" style="position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:999px;background:rgba(20,20,43,.55);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;cursor:pointer">×</span>' +
+      '</div>'
+    : '<button type="button" data-act="addPhoto" style="all:unset;flex:1;height:88px;border-radius:18px;background:var(--amber-bg);border:1px solid var(--hair);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:pointer">' +
+        cameraIcon() + '<div style="font-size:12px;font-weight:700;color:#A9741A">Add photo</div></button>';
+
+  var pinLabel = dr.lat != null ? 'Location saved' : 'Google Maps';
+  var pinHtml = pinTile(dr.lat != null, pinLabel);
+
+  var calHtml = st.showCal ? calendarSheetHtml() : '';
+
+  return '<div class="shell" style="min-height:100vh;background:var(--cream);display:flex;flex-direction:column;padding:24px 20px 100px;box-sizing:border-box">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">' +
+      '<div class="disp" style="font-weight:800;font-size:30px;color:var(--ink)">MyCar</div>' +
+      '<div style="display:flex;gap:9px">' +
+        '<button type="button" data-act="goHistory" style="height:38px;padding:0 15px;border-radius:999px;background:#F3F2F7;display:flex;align-items:center;font-size:13.5px;font-weight:700;color:var(--ink);cursor:pointer">History</button>' +
+        '<button type="button" data-act="goGarage" style="width:38px;height:38px;border-radius:999px;background:var(--indigo-light);display:flex;align-items:center;justify-content:center;cursor:pointer">' +
+          '<span style="display:flex"><span style="width:16px;height:16px;border-radius:999px;background:var(--indigo);display:inline-block"></span><span style="width:16px;height:16px;border-radius:999px;background:var(--coral);display:inline-block;margin-left:-6px;border:1.5px solid var(--indigo-light)"></span></span>' +
+        '</button>' +
+      '</div>' +
+    '</div>' +
+
+    '<button type="button" data-act="goGarage" style="all:unset;display:flex;align-items:center;gap:7px;cursor:pointer;width:fit-content;max-width:100%;margin-bottom:13px;padding:7px 8px 7px 12px;border-radius:999px;background:var(--indigo-light)">' +
+      '<span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--indigo);white-space:nowrap">CAR CODE</span>' +
+      '<span class="disp mono-num" style="font-size:13.5px;font-weight:800;color:var(--ink);letter-spacing:.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(st.carCode || '') + '</span>' +
+      '<span style="width:20px;height:20px;border-radius:999px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--indigo);flex:none">›</span>' +
+    '</button>' +
+
+    '<button type="button" data-act="openCal" style="all:unset;display:flex;align-items:center;gap:11px;background:var(--indigo);color:#fff;border-radius:18px;padding:13px 15px;margin-bottom:13px;cursor:pointer;width:100%;box-sizing:border-box">' +
+      '<div style="width:42px;height:42px;border-radius:13px;background:rgba(255,255,255,.18);display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1"><span style="font-size:8.5px;font-weight:700;opacity:.8">' + MON[d.getMonth()] + '</span><span class="mono-num" style="font-size:16px;font-weight:800">' + d.getDate() + '</span></div>' +
+      '<div style="flex:1;min-width:0;text-align:left">' +
+        '<div style="font-size:15.5px;font-weight:700">' + esc(dateTitle) + '</div>' +
+        '<div style="font-size:11.5px;opacity:.75;font-weight:500">Tap to pick another day</div>' +
+      '</div>' +
+      '<div style="font-size:18px;opacity:.8">›</div>' +
+    '</button>' +
+
+    (isSaved ?
+      '<div style="display:flex;align-items:center;gap:12px;background:var(--green-bg);border-radius:16px;padding:12px 15px;margin-bottom:13px">' +
+        '<div style="width:9px;height:9px;border-radius:999px;background:var(--green)"></div>' +
+        '<div style="flex:1;font-size:13.5px;font-weight:600;color:var(--green-dark)">Parked for ' + elapsedStr(entry) + '</div>' +
+        '<div style="font-size:12.5px;font-weight:700;white-space:nowrap;color:rgba(19,122,92,.65)">since ' + esc(entry.savedTime) + '</div>' +
+      '</div>' : '') +
+
+    '<div style="background:#fff;border:1px solid var(--hair);border-radius:22px;padding:17px 16px;box-shadow:0 8px 22px rgba(20,20,43,.05)">' +
+      '<div style="font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);margin-bottom:5px">BUILDING</div>' +
+      '<input id="buildingInput" data-bind="building" value="' + esc(dr.building) + '" placeholder="Where are you?" style="width:100%;box-sizing:border-box;border:none;border-bottom:2px solid var(--ink);padding:0 0 9px;font-size:19px;font-weight:700;color:var(--ink);background:transparent">' +
+      '<div style="font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);margin:18px 0 9px">FLOOR</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' + floorsHtml + '</div>' +
+      '<div style="font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);margin:18px 0 8px">NOTE</div>' +
+      '<textarea id="noteInput" data-bind="note" placeholder="Landmark, pillar number, anything" style="width:100%;box-sizing:border-box;resize:none;height:56px;background:#F8F7FC;border:none;border-radius:14px;padding:12px 13px;font-size:14.5px;font-weight:500;color:var(--ink);line-height:1.45">' + esc(dr.note) + '</textarea>' +
+    '</div>' +
+
+    '<div style="display:flex;gap:10px;margin-top:13px">' + photoTile + pinHtml + '</div>' +
+
+    '<div style="margin-top:20px">' +
+      '<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:10px">' +
+        '<div style="font-size:11.5px;font-weight:500;color:var(--muted)">' + (entry ? 'Saved at ' + esc(entry.savedTime) + ' by ' + esc(entry.savedBy) : 'The time is stamped when you save') + '</div>' +
+        (entry ? '<button type="button" data-act="deleteCurrent" style="font-size:11.5px;font-weight:700;color:var(--orange);cursor:pointer;white-space:nowrap">Delete</button>' : '') +
+      '</div>' +
+      '<div style="display:flex;gap:10px">' +
+        '<button type="button" data-act="save" style="flex:1;height:56px;border-radius:999px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:800;letter-spacing:-.01em;cursor:pointer">' + (state.busy ? 'Saving…' : (entry ? 'Update this spot' : (isToday ? 'Save today’s spot' : 'Save this day'))) + '</button>' +
+        '<button type="button" data-act="shareLine" style="width:56px;height:56px;border-radius:999px;background:var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 6px 16px rgba(6,199,85,.3)">' +
+          '<span style="width:30px;height:26px;border-radius:12px 12px 12px 3px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:800;color:var(--line);letter-spacing:-.02em">LINE</span>' +
+        '</button>' +
+      '</div>' +
+    '</div>' +
+  '</div>' + calHtml;
+}
+
+function calendarSheetHtml(){
+  var st = state;
+  var dowHtml = DOW.map(function(l){ return '<div style="text-align:center;font-size:10.5px;font-weight:700;color:rgba(20,20,43,.35)">' + l + '</div>'; }).join('');
+  var cells = calendarCells(st.calYear, st.calMonth, st.date);
+  var cellsHtml = cells.map(function(c){
+    if(!c) return '<div></div>';
+    var bg = c.sel ? 'var(--indigo)' : (c.future ? 'transparent' : '#F3F2F7');
+    var fg = c.sel ? '#fff' : (c.future ? 'rgba(20,20,43,.25)' : 'var(--ink)');
+    var dot = c.has ? (c.sel ? 'var(--yellow)' : 'var(--coral)') : 'transparent';
+    var attrs = c.future ? '' : ' data-act="pickDate" data-arg="' + c.key + '"';
+    return '<button type="button"' + attrs + ' style="all:unset;aspect-ratio:1;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:13.5px;font-weight:700;cursor:' + (c.future ? 'default' : 'pointer') + ';background:' + bg + ';color:' + fg + '">' + c.day + '<span style="width:4px;height:4px;border-radius:99px;background:' + dot + '"></span></button>';
+  }).join('');
+  return '<div class="overlay-scrim" data-act="closeCal"></div>' +
+    '<div class="sheet">' +
+      '<div style="width:40px;height:4px;border-radius:99px;background:rgba(20,20,43,.15);margin:0 auto 16px"></div>' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">' +
+        '<button type="button" data-act="prevMonth" style="width:34px;height:34px;border-radius:999px;background:#F3F2F7;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--ink)">‹</button>' +
+        '<div class="disp" style="font-size:19px;font-weight:800;color:var(--ink)">' + MONL[st.calMonth] + ' ' + st.calYear + '</div>' +
+        '<button type="button" data-act="nextMonth" style="width:34px;height:34px;border-radius:999px;background:#F3F2F7;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--ink)">›</button>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:6px">' + dowHtml + '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">' + cellsHtml + '</div>' +
+      '<div style="text-align:center;font-size:11.5px;font-weight:500;color:var(--muted);margin-top:14px">Dots mark days you already recorded · kept for 12 months</div>' +
+    '</div>';
+}
+
+/* ───────────────────────── screen: history ───────────────────────── */
+function historyHtml(){
+  var st = state;
+  var filters = ['All','With photo','Pinned'].map(function(l){
+    var active = st.filter === l;
+    return '<button type="button" data-act="setFilter" data-arg="' + l + '" style="padding:8px 14px;border-radius:999px;font-size:12.5px;font-weight:700;white-space:nowrap;cursor:pointer;background:' + (active ? 'var(--ink)' : '#F3F2F7') + ';color:' + (active ? '#fff' : 'rgba(20,20,43,.6)') + '">' + l + '</button>';
+  }).join('');
+
+  var todayK = todayKey();
+  var list = st.entries.filter(function(e){
+    return st.filter === 'All' || (st.filter === 'With photo' ? !!e.photo : (e.lat != null));
+  });
+  var tints = [['#EFEDFF','#5B5BFF'],['#FFF1DC','#C98A16'],['#E6FBF3','#137A5C'],['#FFE9E3','#E0502A']];
+  var rowsHtml = list.map(function(e, i){
+    var ed = parseKey(e.date);
+    var tint = tints[i % tints.length];
+    var badgeBg = e.photo ? '#E8E5DC' : tint[0];
+    var badgeFg = e.photo ? 'rgba(20,20,43,.35)' : tint[1];
+    var dateLabel = e.date === todayK ? 'TODAY · ' + e.savedTime : DAYL[ed.getDay()].slice(0,3).toUpperCase() + ' ' + ed.getDate() + ' ' + MON[ed.getMonth()] + ' · ' + e.savedTime;
+    var dateFg = e.date === todayK ? 'var(--coral)' : 'rgba(20,20,43,.4)';
+    var sub = (e.floor ? 'Floor ' + e.floor + ' · ' : '') + (e.note || 'No note');
+    var badgeInner = e.photo ? '<img src="' + e.photo + '" style="width:100%;height:100%;object-fit:cover;border-radius:14px" alt="">' : esc(e.floor || '–');
+    return '<button type="button" data-act="openEntry" data-arg="' + e.date + '" style="all:unset;display:flex;gap:12px;align-items:center;background:#fff;border:1px solid var(--hair);border-radius:18px;padding:12px;cursor:pointer;width:100%;box-sizing:border-box;text-align:left">' +
+      '<div style="width:66px;height:66px;border-radius:14px;flex:none;overflow:hidden;display:flex;align-items:center;justify-content:center;font-family:\'Bricolage Grotesque\',sans-serif;font-size:23px;font-weight:800;background:' + badgeBg + ';color:' + badgeFg + '">' + badgeInner + '</div>' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-size:11.5px;font-weight:700;color:' + dateFg + '">' + esc(dateLabel) + '</div>' +
+        '<div style="font-size:16px;font-weight:700;color:var(--ink);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(e.building) + '</div>' +
+        '<div style="font-size:13px;font-weight:500;color:rgba(20,20,43,.5);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(sub) + '</div>' +
+      '</div>' +
+      '<div style="font-size:17px;color:rgba(20,20,43,.25)">›</div>' +
+    '</button>';
+  }).join('');
+
+  return '<div class="shell" style="min-height:100vh;background:var(--cream);display:flex;flex-direction:column;padding:24px 0 30px;box-sizing:border-box">' +
+    '<div style="padding:0 20px 14px;display:flex;align-items:center;justify-content:space-between">' +
+      '<button type="button" data-act="goRecord" style="width:38px;height:38px;border-radius:999px;background:#F3F2F7;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--ink);font-size:17px">‹</button>' +
+      '<div class="disp" style="font-size:24px;font-weight:800;color:var(--ink)">History</div>' +
+      '<div style="width:38px"></div>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;padding:0 20px 14px">' + filters + '</div>' +
+    '<div style="flex:1;padding:0 20px;display:flex;flex-direction:column;gap:10px">' +
+      (list.length ? rowsHtml : '<div style="text-align:center;color:var(--muted);font-size:13.5px;font-weight:500;padding:30px 10px">No records yet — save today’s spot to start your history.</div>') +
+      '<div style="text-align:center;font-size:11.5px;font-weight:500;color:rgba(20,20,43,.35);padding:10px 0 4px">Records older than 12 months are removed automatically</div>' +
+    '</div>' +
+  '</div>';
+}
+
+/* ───────────────────────── screen: detail ───────────────────────── */
+function detailHtml(){
+  var e = getEntry(state.selectedDate);
+  if(!e){
+    return '<div class="shell" style="min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:24px;box-sizing:border-box">' +
+      '<div style="font-size:14px;font-weight:600;color:var(--muted)">That record isn’t here anymore.</div>' +
+      '<button type="button" data-act="goHistory" style="height:44px;padding:0 20px;border-radius:999px;background:var(--ink);color:#fff;font-size:14px;font-weight:700;cursor:pointer">Back to History</button>' +
+    '</div>';
+  }
+  var ed = parseKey(e.date);
+  var dateLabel = DAYL[ed.getDay()] + ' ' + ed.getDate() + ' ' + MONL[ed.getMonth()];
+  var mapBlock = e.lat != null
+    ? '<button type="button" data-act="openMaps" data-lat="' + e.lat + '" data-lng="' + e.lng + '" style="all:unset;display:block;width:100%;height:100px;border-radius:20px;position:relative;overflow:hidden;margin-bottom:14px;background:linear-gradient(115deg,#DDEBDC 0%,#E9F0E4 40%,#DCE7EE 100%);cursor:pointer">' +
+        '<div style="position:absolute;left:48%;top:36%;width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:var(--gred);box-shadow:0 4px 10px rgba(0,0,0,.2)"></div>' +
+        '<div style="position:absolute;left:14px;bottom:12px;padding:7px 12px;border-radius:999px;background:rgba(255,255,255,.92);font-size:12px;font-weight:700;color:var(--gblue)">Open in Google Maps</div>' +
+      '</button>'
+    : '';
+  return '<div class="shell" style="min-height:100vh;background:var(--indigo);display:flex;flex-direction:column;padding:24px 0 0;box-sizing:border-box">' +
+    '<div style="padding:0 20px 16px;display:flex;align-items:center;justify-content:space-between;color:#fff">' +
+      '<button type="button" data-act="goHistory" style="width:38px;height:38px;border-radius:999px;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:17px">‹</button>' +
+      '<div style="font-size:14px;font-weight:700;opacity:.85">' + esc(dateLabel) + '</div>' +
+      '<button type="button" data-act="editEntry" style="padding:8px 14px;border-radius:999px;background:rgba(255,255,255,.18);font-size:13px;font-weight:700;cursor:pointer">Edit</button>' +
+    '</div>' +
+    '<div style="flex:1;background:var(--cream);border-radius:28px 28px 0 0;padding:22px 20px 30px">' +
+      '<div class="disp" style="font-size:27px;font-weight:800;color:var(--ink)">' + esc(e.building) + '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;margin:9px 0 16px;flex-wrap:wrap">' +
+        (e.floor ? '<span style="padding:5px 12px;border-radius:999px;background:var(--coral);color:#fff;font-size:13px;font-weight:800">Floor ' + esc(e.floor) + '</span>' : '') +
+        '<span style="font-size:13px;font-weight:600;color:rgba(20,20,43,.5)">Saved ' + esc(e.savedTime) + ' by ' + esc(e.savedBy) + '</span>' +
+      '</div>' +
+      (e.photo
+        ? '<div style="height:180px;border-radius:20px;overflow:hidden;margin-bottom:11px"><img src="' + e.photo + '" style="width:100%;height:100%;object-fit:cover;display:block" alt="Parking spot photo"></div>'
+        : '<div style="height:148px;border-radius:20px;background:#E8E5DC;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:rgba(20,20,43,.4);margin-bottom:11px">No photo for this day</div>') +
+      mapBlock +
+      '<div style="font-size:14.5px;font-weight:500;color:rgba(20,20,43,.7);line-height:1.5;margin-bottom:18px">' + esc(e.note || 'No note') + '</div>' +
+      '<div style="display:flex;gap:10px;padding-bottom:20px">' +
+        '<button type="button" data-act="shareLine" style="flex:1;height:52px;border-radius:999px;background:var(--line);color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;font-size:15.5px;font-weight:800;cursor:pointer"><span style="padding:2px 7px;border-radius:7px 7px 7px 2px;background:#fff;color:var(--line);font-size:10px;font-weight:800">LINE</span> Share spot</button>' +
+        '<button type="button" data-act="goGarage" style="width:52px;height:52px;border-radius:999px;background:var(--indigo-light);display:flex;align-items:center;justify-content:center;font-size:17px;color:var(--indigo);cursor:pointer">⇪</button>' +
+      '</div>' +
+      '<button type="button" data-act="askDelete" style="width:100%;text-align:center;font-size:14px;font-weight:700;color:var(--orange);padding:4px 0;cursor:pointer">Delete this record</button>' +
+    '</div>' +
+  '</div>';
+}
+
+function confirmHtml(){
+  if(!state.confirming) return '';
+  var e = getEntry(state.selectedDate);
+  var ed = e ? parseKey(e.date) : null;
+  var dateLabel = ed ? DAYL[ed.getDay()] + ' ' + ed.getDate() + ' ' + MONL[ed.getMonth()] : '';
+  return '<div class="overlay-scrim" data-act="cancelDelete"></div>' +
+    '<div class="sheet">' +
+      '<div class="disp" style="font-size:21px;font-weight:800;color:var(--ink)">Delete this record?</div>' +
+      '<div style="font-size:14px;font-weight:500;color:rgba(20,20,43,.6);line-height:1.5;margin:8px 0 18px">' + esc(dateLabel) + (e ? ' · ' + esc(e.building) : '') + '. Everyone sharing the car loses this note.</div>' +
+      '<button type="button" data-act="confirmDelete" style="width:100%;height:52px;border-radius:999px;background:var(--orange);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;cursor:pointer;margin-bottom:10px">Delete</button>' +
+      '<button type="button" data-act="cancelDelete" style="width:100%;height:52px;border-radius:999px;background:#F3F2F7;color:var(--ink);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;cursor:pointer">Keep it</button>' +
+    '</div>';
+}
+
+function codeSheetHtml(){
+  return '<div class="overlay-scrim" data-act="closeCodeSheet"></div>' +
+    '<div class="sheet">' +
+      '<div class="disp" style="font-size:21px;font-weight:800;color:var(--ink)">Your car is ready</div>' +
+      '<div style="font-size:14px;font-weight:500;color:rgba(20,20,43,.6);line-height:1.5;margin:8px 0 18px">Share this code with anyone who drives the car — they join with it and see every spot you save.</div>' +
+      '<div style="background:var(--indigo);border-radius:20px;padding:18px 20px;color:#fff;margin-bottom:14px;text-align:center">' +
+        '<div style="font-size:11px;font-weight:700;letter-spacing:.1em;opacity:.7">CAR CODE</div>' +
+        '<div class="disp mono-num" style="font-size:34px;font-weight:800;letter-spacing:.07em;margin-top:4px">' + esc(state.carCode || '') + '</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:10px;margin-bottom:10px">' +
+        '<button type="button" data-act="copyCode" style="flex:1;height:50px;border-radius:999px;background:#F3F2F7;color:var(--ink);display:flex;align-items:center;justify-content:center;font-size:14.5px;font-weight:700;cursor:pointer">Copy code</button>' +
+        '<button type="button" data-act="inviteLine" style="flex:1;height:50px;border-radius:999px;background:var(--line);color:#fff;display:flex;align-items:center;justify-content:center;gap:6px;font-size:14.5px;font-weight:800;cursor:pointer"><span style="padding:2px 6px;border-radius:6px 6px 6px 2px;background:#fff;color:var(--line);font-size:9.5px;font-weight:800">LINE</span> Invite</button>' +
+      '</div>' +
+      '<button type="button" data-act="closeCodeSheet" style="width:100%;height:52px;border-radius:999px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;cursor:pointer">Got it</button>' +
+    '</div>';
+}
+
+/* ───────────────────────── screen: garage ───────────────────────── */
+function garageHtml(){
+  var membersHtml = membersVm().map(function(m){
+    return '<div style="display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--hair);border-radius:16px;padding:12px 14px">' +
+      '<div style="width:38px;height:38px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#fff;background:' + m.color + '">' + esc(m.initial) + '</div>' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-size:15px;font-weight:700;color:var(--ink)">' + esc(m.name) + (m.isYou ? ' (you)' : '') + '</div>' +
+        '<div style="font-size:12.5px;font-weight:500;color:rgba(20,20,43,.5)">' + m.role + '</div>' +
+      '</div>' +
+      '<div style="font-size:12.5px;font-weight:700;color:rgba(20,20,43,.35)">' + esc(m.last) + '</div>' +
+    '</div>';
+  }).join('');
+
+  return '<div class="shell" style="min-height:100vh;background:var(--cream);display:flex;flex-direction:column;padding:24px 20px 30px;box-sizing:border-box">' +
+    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">' +
+      '<button type="button" data-act="goRecord" style="width:38px;height:38px;border-radius:999px;background:#F3F2F7;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--ink);font-size:17px">‹</button>' +
+      '<div class="disp" style="font-size:24px;font-weight:800;color:var(--ink)">Shared car</div>' +
+    '</div>' +
+    '<div style="background:var(--indigo);border-radius:22px;padding:20px;color:#fff;margin-bottom:16px">' +
+      '<div style="font-size:11.5px;font-weight:700;letter-spacing:.1em;opacity:.7">CAR CODE</div>' +
+      '<button type="button" data-act="copyCode" style="all:unset;cursor:pointer;display:block"><div class="disp" style="font-size:36px;font-weight:800;letter-spacing:.08em;margin:4px 0 10px">' + esc(state.carCode || '') + '</div></button>' +
+      '<div style="font-size:13.5px;font-weight:500;opacity:.85;line-height:1.5">Anyone who opens this link and enters this code joins the same car and sees every record — no login of any kind required. Tap the code to copy it.</div>' +
+      '<button type="button" data-act="inviteLine" style="margin-top:14px;width:100%;height:46px;border-radius:999px;background:var(--line);color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;font-size:14.5px;font-weight:800;cursor:pointer"><span style="padding:2px 7px;border-radius:7px 7px 7px 2px;background:#fff;color:var(--line);font-size:10px;font-weight:800">LINE</span> Invite via LINE</button>' +
+    '</div>' +
+    '<div style="font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);margin-bottom:9px">DRIVERS</div>' +
+    '<div style="display:flex;flex-direction:column;gap:9px">' + (membersHtml || '<div style="font-size:13px;color:var(--muted)">Just you so far.</div>') + '</div>' +
+    '<div style="margin-top:16px;background:var(--amber-bg);border-radius:16px;padding:14px 15px;font-size:13px;font-weight:500;color:var(--amber-text);line-height:1.55">Everyone edits the same day. The last save wins, and the card shows who saved it.</div>' +
+    '<button type="button" data-act="signOut" style="margin-top:auto;padding-top:24px;text-align:center;font-size:14px;font-weight:700;color:rgba(20,20,43,.4);cursor:pointer;width:100%">Sign out</button>' +
+  '</div>';
+}
+
+/* ───────────────────────── toast ───────────────────────── */
+function toastHtml(){
+  if(!state.toast) return '';
+  return '<div class="toast">' + esc(state.toast) + '</div>';
+}
+
+/* ───────────────────────── render dispatcher ───────────────────────── */
+function render(){
+  var app = document.getElementById('app');
+  var html;
+  if(state.booting){ html = splashHtml(); }
+  else if(state.screen === 'setup'){ html = setupNeededHtml(); }
+  else if(state.screen === 'welcome'){ html = welcomeHtml(); }
+  else if(state.screen === 'record'){ html = recordHtml(); }
+  else if(state.screen === 'history'){ html = historyHtml(); }
+  else if(state.screen === 'detail'){ html = detailHtml() + confirmHtml(); }
+  else if(state.screen === 'garage'){ html = garageHtml(); }
+  else { html = welcomeHtml(); }
+  html += (state.showCodeSheet ? codeSheetHtml() : '') + toastHtml();
+  app.innerHTML = html;
+}
+
+/* ───────────────────────── event delegation ───────────────────────── */
+function dispatch(act, arg, el){
+  switch(act){
+    case 'showJoin': state.welcome.showJoin = !state.welcome.showJoin; render(); break;
+    case 'startCar': onStartCar(); break;
+    case 'closeCodeSheet': state.showCodeSheet = false; render(); break;
+    case 'joinCar': onJoinCar(); break;
+    case 'openCal': { var d0 = parseKey(state.date); state.showCal = true; state.calYear = d0.getFullYear(); state.calMonth = d0.getMonth(); render(); break; }
+    case 'closeCal': state.showCal = false; render(); break;
+    case 'prevMonth': if(state.calMonth === 0){ state.calMonth = 11; state.calYear--; } else state.calMonth--; render(); break;
+    case 'nextMonth': if(state.calMonth === 11){ state.calMonth = 0; state.calYear++; } else state.calMonth++; render(); break;
+    case 'pickDate': if(arg && arg <= todayKey()){ state.date = arg; state.showCal = false; state.draft = null; render(); } break;
+    case 'pickFloor': setDraft({ floor: arg }); render(); break;
+    case 'addFloor': onAddFloor(); break;
+    case 'addPhoto': var pi = document.getElementById('photoInput'); if(pi) pi.click(); break;
+    case 'removePhoto': setDraft({ photo: null }); render(); break;
+    case 'addPin': requestLocation(); break;
+    case 'removePin': setDraft({ lat: null, lng: null }); render(); break;
+    case 'save': doSave(); break;
+    case 'deleteCurrent': onDeleteCurrent(); break;
+    case 'shareLine': onShareLine(); break;
+    case 'goHistory': state.screen = 'history'; render(); break;
+    case 'goRecord': state.screen = 'record'; render(); break;
+    case 'goGarage': state.screen = 'garage'; render(); break;
+    case 'setFilter': state.filter = arg; render(); break;
+    case 'openEntry': state.selectedDate = arg; state.screen = 'detail'; render(); break;
+    case 'editEntry': { var ee = getEntry(state.selectedDate); if(ee){ state.date = ee.date; state.draft = null; state.screen = 'record'; render(); } break; }
+    case 'askDelete': state.confirming = true; render(); break;
+    case 'cancelDelete': state.confirming = false; render(); break;
+    case 'confirmDelete': onConfirmDelete(); break;
+    case 'copyCode': copyCode(); break;
+    case 'inviteLine': shareCarInvite(); break;
+    case 'signOut': signOut(); break;
+    case 'openMaps': {
+      var lat = el && el.getAttribute('data-lat'); var lng = el && el.getAttribute('data-lng');
+      if(lat != null && lng != null) openInMaps(lat, lng);
+      break;
+    }
+  }
+}
+
+document.addEventListener('click', function(e){
+  var t = e.target.closest('[data-act]');
+  if(!t) return;
+  e.preventDefault();
+  dispatch(t.getAttribute('data-act'), t.getAttribute('data-arg'), t);
+});
+document.addEventListener('input', function(e){
+  var t = e.target;
+  if(!t || !t.dataset) return;
+  if(t.dataset.bind === 'building'){ setDraft({ building: t.value }); }
+  else if(t.dataset.bind === 'note'){ setDraft({ note: t.value }); }
+  else if(t.dataset.bind === 'welcomeName'){ state.welcome.name = t.value; }
+  else if(t.dataset.bind === 'welcomeCode'){ state.welcome.code = t.value; }
+});
+document.addEventListener('change', function(e){
+  if(e.target && e.target.id === 'photoInput'){
+    handlePhotoFile(e.target.files && e.target.files[0]);
+    e.target.value = '';
+  }
+});
+
+/* ───────────────────────── periodic elapsed-time refresh ───────────────────────── */
+setInterval(function(){
+  if(state.screen !== 'record') return;
+  var active = document.activeElement;
+  var typing = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+  if(!typing) render();
+}, 30000);
+
+/* ───────────────────────── boot ───────────────────────── */
+async function boot(){
+  render();
+  await store.init();
+  state.driverId = ensureDriverId();
+  if(store.mode !== 'supabase'){
+    state.booting = false;
+    state.screen = 'setup';
+    render();
+    return;
+  }
+  var savedCode = localStorage.getItem('mycar_car_code');
+  var savedName = localStorage.getItem('mycar_driver_name');
+  state.booting = false;
+  if(savedCode && savedName){
+    state.driverName = savedName;
+    enterCar(savedCode);
+  }else{
+    state.screen = 'welcome';
+    render();
+  }
+}
+boot();
+
+})();
+</script>
+</body>
+</html>
