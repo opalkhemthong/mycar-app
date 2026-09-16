@@ -300,8 +300,7 @@ async function onJoinOrCreate(){
     await store.upsertMember(code, state.driverId, { name: name, role: 'Driver' });
     persistSession(code, name);
     enterCar(code);
-    if(created){ state.showCodeSheet = true; render(); }
-    else { flash('Joined this car'); }
+    flash(created ? 'Car created' : 'Joined this car');
   }catch(err){ console.error(err); flash('Could not join — try again'); }
 }
 
@@ -511,11 +510,11 @@ function welcomeHtml(){
   var codeBoxesHtml = [0,1,2,3].map(function(i){
     var ch = w.code[i] || '';
     var active = w.code.length === i;
-    return '<div style="flex:1;height:62px;border-radius:18px;display:flex;align-items:center;justify-content:center;gap:2px;font-weight:900;color:#fff;box-sizing:border-box;background:' + (ch ? 'rgba(255,255,255,.16)' : 'rgba(255,255,255,.08)') + ';border:2px solid ' + (active ? 'var(--yellow)' : 'transparent') + '">' + (ch ? '<span style="font-size:15px;opacity:.55">#</span><span style="font-size:26px">' + esc(ch) + '</span>' : '') + '</div>';
+    return '<div style="flex:1;height:62px;border-radius:18px;display:flex;align-items:center;justify-content:center;gap:2px;font-weight:900;color:#fff;box-sizing:border-box;background:' + (ch ? 'rgba(255,255,255,.16)' : 'rgba(255,255,255,.08)') + ';border:2px solid ' + (active ? 'var(--yellow)' : 'transparent') + '">' + (ch ? '<span style="font-size:26px">' + esc(ch) + '</span>' : '') + '</div>';
   }).join('');
-  var keys = ['1','2','3','4','5','6','7','8','9','','0','back'];
+  var keys = ['1','2','3','4','5','6','7','8','9','#','0','back'];
   var keysHtml = keys.map(function(k){
-    if(k === '') return '<div></div>';
+    if(k === '#') return '<div style="height:46px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:700;color:rgba(255,255,255,.35);background:rgba(255,255,255,.08)">#</div>';
     var label = k === 'back' ? '⌫' : k;
     return '<button type="button" data-act="keypad" data-arg="' + k + '" style="height:46px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:700;cursor:pointer;color:#fff;background:rgba(255,255,255,.14)">' + label + '</button>';
   }).join('');
@@ -535,7 +534,7 @@ function welcomeHtml(){
         '<div style="flex:1;height:1px;background:rgba(255,255,255,.25)"></div>' +
       '</div>' +
       '<input id="welcomeNameInput" data-bind="welcomeName" value="' + esc(w.name) + '" placeholder="Type your name" style="width:100%;height:46px;box-sizing:border-box;border:1.5px solid rgba(255,255,255,.4);border-radius:999px;background:rgba(255,255,255,.12);text-align:center;font-size:15px;font-weight:700;padding:0 14px;color:' + (w.name.trim() ? 'var(--yellow)' : '#fff') + '">' +
-      '<button type="button" data-act="joinOrCreate" style="height:54px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-size:16.5px;font-weight:800;cursor:pointer;margin-top:2px;background:' + (canJoin ? 'var(--yellow)' : 'rgba(255,255,255,.18)') + ';color:' + (canJoin ? 'var(--ink)' : 'rgba(255,255,255,.5)') + '">Join this car</button>' +
+      '<button type="button" data-act="joinOrCreate" style="height:54px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-size:16.5px;font-weight:800;cursor:pointer;margin-top:2px;background:' + (canJoin ? 'var(--yellow)' : 'rgba(255,197,49,.4)') + ';color:' + (canJoin ? 'var(--ink)' : 'rgba(20,20,43,.45)') + '">Join this car</button>' +
     '</div>' +
   '</div>';
 }
@@ -917,7 +916,16 @@ document.addEventListener('input', function(e){
   if(t.dataset.bind === 'building'){ setDraft({ building: t.value }); }
   else if(t.dataset.bind === 'floorText'){ setDraft({ floor: t.value }); }
   else if(t.dataset.bind === 'note'){ setDraft({ note: t.value }); }
-  else if(t.dataset.bind === 'welcomeName'){ state.welcome.name = t.value; }
+  else if(t.dataset.bind === 'welcomeName'){
+    state.welcome.name = t.value;
+    t.style.color = t.value.trim() ? 'var(--yellow)' : '#fff';
+    var btn = document.querySelector('[data-act="joinOrCreate"]');
+    if(btn){
+      var canJ = state.welcome.code.length === 4 && t.value.trim();
+      btn.style.background = canJ ? 'var(--yellow)' : 'rgba(255,197,49,.4)';
+      btn.style.color = canJ ? 'var(--ink)' : 'rgba(20,20,43,.45)';
+    }
+  }
 });
 document.addEventListener('change', function(e){
   if(e.target && e.target.id === 'photoInput'){
